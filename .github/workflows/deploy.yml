@@ -1,0 +1,52 @@
+name: Update calculator
+
+on:
+  push:
+    branches: [stage2]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculator-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, Windows, X64, calculator]
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build --pull -t "calculator:$env:GITHUB_SHA" .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Update container
+        run: |
+          $existing = docker ps -a --filter 'name=^/calculator-stage2$' --format '{{.Names}}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($existing) {
+            docker rm -f calculator-stage2
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          docker run -d --name calculator-stage2 -p 127.0.0.1:8001:8000 "calculator:$env:GITHUB_SHA"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Check API
+        run: |
+          for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            try {
+              $response = Invoke-RestMethod 'http://127.0.0.1:8001/add?a=2&b=3'
+              if ($response.result -ne 5) { throw 'Unexpected result' }
+              Write-Output 'API is ready: 2 + 3 = 5'
+              exit 0
+            } catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+          docker logs calculator-stage2
+          throw 'API did not become ready'
