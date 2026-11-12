@@ -27,9 +27,7 @@ jobs:
 
       - name: Update container
         run: |
-          docker ps -a --filter "name=^/calculator-stage2$" --format "{{.Names}}" > container.txt
-          if errorlevel 1 exit /b 1
-          findstr /x calculator-stage2 container.txt >nul
+          docker container inspect calculator-stage2 >nul 2>&1
           if not errorlevel 1 (
             docker rm -f calculator-stage2
             if errorlevel 1 exit /b 1
