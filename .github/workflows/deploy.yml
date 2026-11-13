@@ -1,18 +1,19 @@
-name: Update calculator
+name: Проверка и обновление калькулятора
 
 on:
   push:
-    branches: [stage2]
+    branches: [stage3]
 
 permissions:
   contents: read
 
 concurrency:
-  group: calculator-deploy
+  group: calculator-stage3
   cancel-in-progress: false
 
 jobs:
   deploy:
+    timeout-minutes: 30
     runs-on: [self-hosted, Windows, X64, calculator]
     defaults:
       run:
@@ -20,24 +21,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build image
+      - name: Сборка образа
         run: |
           docker build --pull -t calculator:%GITHUB_SHA% .
           if errorlevel 1 exit /b 1
 
-      - name: Update container
+      - name: Проверка кода Semgrep
         run: |
-          docker container inspect calculator-stage2 >nul 2>&1
-          if not errorlevel 1 (
-            docker rm -f calculator-stage2
-            if errorlevel 1 exit /b 1
-          )
-          docker run -d --name calculator-stage2 -p 127.0.0.1:8001:8000 calculator:%GITHUB_SHA%
+          mkdir reports
+          docker run --rm -v "%cd%:/src" -w /src semgrep/semgrep:1.185.0 semgrep scan --config p/python --metrics=off --disable-version-check --json --output reports/semgrep.json main.py
           if errorlevel 1 exit /b 1
 
-      - name: Check API
+      - name: Проверка образа Trivy
         run: |
-          curl --fail --silent --show-error --retry 15 --retry-delay 2 --retry-all-errors "http://127.0.0.1:8001/add?a=2&b=3" -o response.json
+          docker save -o image.tar calculator:%GITHUB_SHA%
+          if errorlevel 1 exit /b 1
+          docker run --rm -v "%cd%:/work" -v calculator-trivy-cache:/root/.cache/ aquasec/trivy:0.76.2 image --input /work/image.tar --scanners vuln --format json --output /work/reports/trivy.json
+          if errorlevel 1 exit /b 1
+
+      - name: Сохранение отчётов
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: reports/*.json
+          if-no-files-found: error
+
+      - name: Обновление контейнера
+        run: |
+          docker container inspect calculator-stage3 >nul 2>&1
+          if not errorlevel 1 (
+            docker rm -f calculator-stage3
+            if errorlevel 1 exit /b 1
+          )
+          docker run -d --name calculator-stage3 -p 127.0.0.1:8002:8000 calculator:%GITHUB_SHA%
+          if errorlevel 1 exit /b 1
+
+      - name: Проверка API
+        run: |
+          curl --fail --silent --show-error --retry 15 --retry-delay 2 --retry-all-errors "http://127.0.0.1:8002/add?a=2&b=3" -o response.json
           if errorlevel 1 exit /b 1
           type response.json
           powershell -NoProfile -Command "if ((Get-Content response.json -Raw | ConvertFrom-Json).result -ne 5) { exit 1 }"
