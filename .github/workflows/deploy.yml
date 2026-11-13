@@ -29,7 +29,7 @@ jobs:
       - name: Проверка кода Semgrep
         run: |
           mkdir reports
-          docker run --rm -v "%cd%:/src" -w /src semgrep/semgrep:1.185.0 semgrep scan --config p/python --metrics=off --disable-version-check --json --output reports/semgrep.json main.py
+          docker run --rm -v "%cd%:/src" -w /src python:3.12-slim sh -c "pip install --no-cache-dir semgrep==1.185.0 && semgrep scan --config p/python --metrics=off --disable-version-check --json --output reports/semgrep.json main.py"
           if errorlevel 1 exit /b 1
 
       - name: Проверка образа Trivy
